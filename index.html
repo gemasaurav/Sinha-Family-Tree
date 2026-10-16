@@ -530,13 +530,21 @@
       right: 0;
       top: 100%;
       margin-top: 4px;
-      max-height: 240px;
+      max-height: min(50vh, 280px);
       overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
       background: #fff;
       border: 2px solid #2e7d32;
       border-radius: 12px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.18);
       z-index: 3000;
+    }
+    .name-option {
+      touch-action: pan-y;
+      -webkit-user-select: none;
+      user-select: none;
     }
     .name-dropdown.open {
       display: block;
@@ -821,6 +829,15 @@
     </div>
   </div>
 
+  
+  <div class="detail-overlay" id="detailOverlay" style="display:none;">
+    <div class="detail-card leaf-detail" id="detailCard">
+      <div class="detail-photo" id="detailPhoto"></div>
+      <div class="detail-name" id="detailName"></div>
+      <div class="detail-dob" id="detailDob"></div>
+    </div>
+  </div>
+
   <script>
   (function () {
     "use strict";
@@ -1047,7 +1064,7 @@
     }
 
 
-        function showPersonDetail(id) {
+            function showPersonDetail(id) {
       var p = people[id];
       if (!p) return;
       var photoEl = document.getElementById("detailPhoto");
@@ -1056,8 +1073,7 @@
       } else {
         photoEl.innerHTML = initials(p.name);
       }
-      /* Yellow ring on popup for listed people */
-      if (yellowCircleIds[id]) {
+      if (typeof yellowCircleIds !== "undefined" && yellowCircleIds[id]) {
         photoEl.className = "detail-photo yellow-ring";
       } else {
         photoEl.className = "detail-photo";
@@ -1067,16 +1083,15 @@
       var ov = document.getElementById("detailOverlay");
       ov.style.display = "flex";
       ov.classList.add("open");
-      window.__detailOpen = true;
     }
 
-        function hidePersonDetail() {
+
+    function hidePersonDetail() {
       var ov = document.getElementById("detailOverlay");
       if (ov) {
         ov.classList.remove("open");
         ov.style.display = "none";
       }
-      window.__detailOpen = false;
     }
     window.hidePersonDetail = hidePersonDetail;
 
@@ -1229,20 +1244,46 @@
       dd.innerHTML = html;
       dd.classList.add("open");
       var opts = dd.querySelectorAll(".name-option[data-id]");
-      function pickName(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        var id = this.getAttribute("data-id");
+      var touchStartY = 0;
+      var touchStartX = 0;
+      var didScroll = false;
+
+      function selectNameById(id) {
         if (!id || !people[id]) return;
         var inp = document.getElementById("personSearch");
         if (inp) inp.value = people[id].name;
         dd.classList.remove("open");
         selectPerson(id);
       }
+
       for (var j = 0; j < opts.length; j++) {
-        opts[j].addEventListener("mousedown", pickName);
-        opts[j].addEventListener("click", pickName);
-        opts[j].addEventListener("touchend", pickName);
+        (function (el) {
+          /* Desktop: click only */
+          el.addEventListener("click", function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            selectNameById(el.getAttribute("data-id"));
+          });
+          /* Mobile: distinguish scroll vs tap */
+          el.addEventListener("touchstart", function (e) {
+            var t = e.touches[0];
+            touchStartY = t.clientY;
+            touchStartX = t.clientX;
+            didScroll = false;
+          }, { passive: true });
+          el.addEventListener("touchmove", function (e) {
+            var t = e.touches[0];
+            if (Math.abs(t.clientY - touchStartY) > 8 || Math.abs(t.clientX - touchStartX) > 8) {
+              didScroll = true;
+            }
+          }, { passive: true });
+          el.addEventListener("touchend", function (e) {
+            if (didScroll) return; /* was scrolling the list — do not open */
+            e.preventDefault();
+            e.stopPropagation();
+            selectNameById(el.getAttribute("data-id"));
+          }, { passive: false });
+        })(opts[j]);
       }
     }
     function hideNameDropdown() {
@@ -1307,47 +1348,32 @@
             
     
     
+    
+    /* Close popup by tapping outside the leaf card (HHD-style, no X button) */
+    
+    /* Close popup by tapping outside the leaf (no X button) */
     function bindDetailClose() {
       var ov = document.getElementById("detailOverlay");
       var card = document.getElementById("detailCard");
-      var x = document.getElementById("detailX");
+      if (!ov || ov.getAttribute("data-bound") === "1") return;
+      ov.setAttribute("data-bound", "1");
 
-      function closeIt(e) {
-        if (e) {
-          try { e.preventDefault(); } catch (err) {}
-          try { e.stopPropagation(); } catch (err) {}
+      ov.addEventListener("click", function (e) {
+        if (e.target === ov) {
+          hidePersonDetail();
         }
-        hidePersonDetail();
-        return false;
-      }
+      });
 
-      /* Red X — multiple event types for mobile */
-      if (x) {
-        ["click", "touchend", "touchstart", "mouseup"].forEach(function (evt) {
-          x.addEventListener(evt, function (e) {
-            closeIt(e);
-          }, true);
-        });
-        x.setAttribute("onclick", "hidePersonDetail();return false;");
-      }
-
-      /* Backdrop / dark area */
-      var bd = document.getElementById("detailBackdrop");
-      if (bd) {
-        ["click", "touchend", "touchstart"].forEach(function (evt) {
-          bd.addEventListener(evt, closeIt, true);
-        });
-      }
-
-      /* Any tap on overlay that is NOT inside the leaf card */
-      if (ov) {
-        function onOv(e) {
-          if (!window.__detailOpen) return;
-          if (card && card.contains(e.target)) return;
-          closeIt(e);
+      ov.addEventListener("touchend", function (e) {
+        if (e.target === ov) {
+          e.preventDefault();
+          hidePersonDetail();
         }
-        ov.addEventListener("click", onOv, true);
-        ov.addEventListener("touchend", onOv, true);
+      }, { passive: false });
+
+      if (card) {
+        card.addEventListener("click", function (e) { e.stopPropagation(); });
+        card.addEventListener("touchend", function (e) { e.stopPropagation(); });
       }
 
       document.addEventListener("keydown", function (e) {
@@ -1355,6 +1381,14 @@
       });
     }
     bindDetailClose();
+    /* Fallback: re-bind after full parse if overlay was late */
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", bindDetailClose);
+    } else {
+      setTimeout(bindDetailClose, 0);
+    }
+
+
 
 
 
@@ -1362,15 +1396,5 @@
 
   })();
   </script>
-
-    <div class="detail-overlay" id="detailOverlay">
-    <div class="detail-backdrop" id="detailBackdrop"></div>
-    <div class="detail-card leaf-detail" id="detailCard">
-      <div class="detail-photo" id="detailPhoto"></div>
-      <div class="detail-name" id="detailName"></div>
-      <div class="detail-dob" id="detailDob"></div>
-      </div>
-    <button type="button" class="detail-x" id="detailX" aria-label="Close">✕</button>
-  </div>
 </body>
 </html>
